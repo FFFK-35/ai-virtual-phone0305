@@ -9,7 +9,6 @@ import { RealityBridgeScheduler } from "@/components/reality-bridge-scheduler";
 import { MediaMaintenanceScheduler } from "@/components/media-maintenance-scheduler";
 import { DesktopShell } from "./desktop-shell";
 import { OfflinePushRevampAnnouncement } from "./offline-push-revamp-announcement";
-import { SplashAnimation } from "./splash-animation";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
@@ -149,31 +148,84 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
   await Promise.all(BUILTIN_FONT_LOAD_SPECS.map((spec) => document.fonts.load(spec).catch(() => [])));
 }
 
-function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
+// -- helpers --
+function useRealtimeClock(intervalMs = 1000) {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return time;
+}
+
+// ===== 锁屏组件 =====
+function LockScreen({ onUnlock }: { onUnlock: () => void }) {
+  const now = useRealtimeClock(1000);
+  const scrollLockRef = useRef<HTMLDivElement>(null);
+  const [leaving, setLeaving] = useState(false);
+
+  // 响应式字号：移动端小字、桌面端大字
+  const timeSize = "3.5rem";
+  const dateSize = "0.85rem";
+  const padSize = "1.2rem";
+
+  // —— 上滑解锁 ——
+  useEffect(() => {
+    const el = scrollLockRef.current;
+    if (!el) return;
+
+    let unlock = false;
+    const doUnlock = () => {
+      if (unlock) return;
+      unlock = true;
+      setLeaving(true);
+      setTimeout(onUnlock, 420);
+    };
+
+    // 移动端 touch 滑动
+    let startY = 0;
+    const onTouchStart = (e: TouchEvent) => { startY = e.touches[0].clientY; };
+    const onTouchEnd = (e: TouchEvent) => {
+      const dy = startY - (e.changedTouches[0]?.clientY ?? startY);
+      if (dy > 80) doUnlock();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchend", onTouchEnd);
+
+    // 桌面端 wheel
+    const onWheel = (e: WheelEvent) => {
+      if (!unlock && e.deltaY < -30) doUnlock();
+    };
+    el.addEventListener("wheel", onWheel, { passive: true });
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [onUnlock]);
+
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  const weekDays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")} ${weekDays[now.getDay()]}`;
+
   return (
-    <main className="app-root splash-root">
-      <section
-        className="phone-shell-wrap splash-shell-wrap"
-        aria-label={TEXT.loading}
-      >
-        <div className="phone-case">
-          <div className="phone-frame">
-            <div className="phone-shell splash-phone-screen">
-              <SplashAnimation />
-              <button
-                type="button"
-                className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}
-                onClick={onEnter}
-                disabled={!ready}
-                aria-label="Enter"
-              >
-                <ArrowRight size={18} strokeWidth={1.8} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
+    <div
+      ref={scrollLockRef}
+      className={`lock-screen-root${leaving ? " lock-screen-leaving" : ""}`}
+      style={{
+        backgroundImage: `url(https://tuchuang.org.cn/imgs/2026/08/31/d0e50d7f02840ed2.png)`,
+      }}
+    >
+      <div className="lock-screen-time">
+        {hh}:{mm}
+      </div>
+      <div className="lock-screen-date">
+        {dateStr}
+      </div>
+      <div className="lock-screen-hint" />
+    </div>
   );
 }
 
@@ -279,7 +331,7 @@ export function MainApp() {
   return (
     <AccountGate>
       {!splashDismissed ? (
-        <SplashScreen ready={hydrated} onEnter={() => setSplashDismissed(true)} />
+        <LockScreen onUnlock={() => setSplashDismissed(true)} />
       ) : (
         <main className="app-root">
           <MusicProvider>
