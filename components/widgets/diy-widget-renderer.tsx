@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState, useRef } from "react";
 import type { WidgetInstance, DIYWidgetTemplate } from "@/lib/widget-types";
 import { getThemeAssetMap } from "@/lib/theme-storage";
