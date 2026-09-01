@@ -130,29 +130,28 @@ async function runImageGeneration(input: ImageGenerationRequest): Promise<{ stat
     if (!model) return { status: 400, body: { error: "缺少模型名" } };
     if (!prompt) return { status: 400, body: { error: "缺少提示词" } };
 
-    const url = buildImageUrl(baseUrl, hasReference ? "edits" : "generations");
-    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-    let body: BodyInit;
+    const url = buildImageUrl(baseUrl, "generations");
+    const headers: Record<string, string> = { 
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    };
+    
+    const requestBody: Record<string, any> = {
+      model,
+      prompt,
+      ...(input.size && input.size !== "auto" ? { size: input.size } : {}),
+      ...(input.quality && input.quality !== "auto" ? { quality: input.quality } : {}),
+    };
 
-    if (hasReference) {
-      const converted = dataUrlToBlob(input.referenceImageDataUrl || "");
-      if (!converted) return { status: 400, body: { error: "参考图格式无效" } };
-      const form = new FormData();
-      form.set("model", model);
-      form.set("prompt", prompt);
-      if (input.size && input.size !== "auto") form.set("size", input.size);
-      if (input.quality && input.quality !== "auto") form.set("quality", input.quality);
-      form.append("image", converted.blob, `reference.${converted.mimeType.split("/")[1] || "png"}`);
-      body = form;
-    } else {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify({
-        model,
-        prompt,
-        ...(input.size && input.size !== "auto" ? { size: input.size } : {}),
-        ...(input.quality && input.quality !== "auto" ? { quality: input.quality } : {}),
-      });
+    if (hasReference && input.referenceImageDataUrl) {
+      // 兼容多种中转站和模型的参考图字段
+      requestBody.image = input.referenceImageDataUrl;
+      requestBody.image_url = input.referenceImageDataUrl;
+      requestBody.reference_image = input.referenceImageDataUrl;
+      requestBody.input_image = input.referenceImageDataUrl;
     }
+
+    const body = JSON.stringify(requestBody);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);

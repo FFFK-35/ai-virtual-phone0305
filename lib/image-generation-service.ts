@@ -321,30 +321,27 @@ async function generateImageDirect(params: {
   const { settings, prompt, referenceImageDataUrl, signal, proxyBaseUrl } = params;
   throwIfAborted(signal);
   const hasReference = Boolean(referenceImageDataUrl);
-  const url = buildImageUrl(proxyBaseUrl || settings.baseUrl, hasReference ? "edits" : "generations");
-  const headers: Record<string, string> = { Authorization: `Bearer ${settings.apiKey}` };
+  // 中转站和新一代大模型（如 Wan2.1/2.7）的图生图/参考图通常依然走 generations 接口，以 JSON 格式传递
+  const url = buildImageUrl(proxyBaseUrl || settings.baseUrl, "generations");
+  const headers: Record<string, string> = { Authorization: `Bearer ${settings.apiKey}`, "Content-Type": "application/json" };
   if (proxyBaseUrl) headers["x-upstream-base-url"] = normalizeBaseUrl(settings.baseUrl);
-  let body: BodyInit;
+  
+  const requestBody: Record<string, any> = {
+    model: settings.model,
+    prompt,
+    ...(settings.size && settings.size !== "auto" ? { size: settings.size } : {}),
+    ...(settings.quality && settings.quality !== "auto" ? { quality: settings.quality } : {}),
+  };
 
-  if (hasReference) {
-    const converted = dataUrlToBlob(referenceImageDataUrl || "");
-    if (!converted) throw new Error("参考图格式无效");
-    const form = new FormData();
-    form.set("model", settings.model);
-    form.set("prompt", prompt);
-    if (settings.size && settings.size !== "auto") form.set("size", settings.size);
-    if (settings.quality && settings.quality !== "auto") form.set("quality", settings.quality);
-    form.append("image", converted.blob, `reference.${imageExtension(converted.mimeType)}`);
-    body = form;
-  } else {
-    headers["Content-Type"] = "application/json";
-    body = JSON.stringify({
-      model: settings.model,
-      prompt,
-      ...(settings.size && settings.size !== "auto" ? { size: settings.size } : {}),
-      ...(settings.quality && settings.quality !== "auto" ? { quality: settings.quality } : {}),
-    });
+  if (hasReference && referenceImageDataUrl) {
+    // 兼容多种中转站和模型的参考图字段：有些用 image，有些用 input_image，有些用 image_url / reference_image
+    requestBody.image = referenceImageDataUrl;
+    requestBody.image_url = referenceImageDataUrl;
+    requestBody.reference_image = referenceImageDataUrl;
+    requestBody.input_image = referenceImageDataUrl;
   }
+
+  const body = JSON.stringify(requestBody);
 
   // 总超时 360s,外部 signal 联动;防止上游悬挂导致界面永久转圈。
   // 部分中转的按次生图（如 gpt-image 系）单张实测 3~5 分钟,180s 会在完成前掐断(钱照扣图丢失)。
